@@ -231,7 +231,7 @@ def compress_with_model(args, context: str) -> tuple[str, float, dict]:
 
 def normalized_tokens(text: str) -> list[str]:
     """Words used for a lightweight, deterministic answer-overlap score."""
-    return re.findall(r"\\w+", text.casefold(), flags=re.UNICODE)
+    return re.findall(r"\w+", text.casefold(), flags=re.UNICODE)
 
 
 def answer_quality(answer: str, reference: str) -> dict:
@@ -247,7 +247,7 @@ def answer_quality(answer: str, reference: str) -> dict:
     recall = overlap / expected_n if expected_n else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
     return {
-        "exact_match": int(list(predicted.elements()) == list(expected.elements())),
+        "exact_match": int(normalized_tokens(answer) == normalized_tokens(reference)),
         "token_precision": round(precision, 4),
         "token_recall": round(recall, 4),
         "token_f1": round(f1, 4),
