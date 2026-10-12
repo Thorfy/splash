@@ -7,6 +7,7 @@ Only the Python standard library is required.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import hashlib
 import json
 import os
@@ -228,6 +229,31 @@ def compress_with_model(args, context: str) -> tuple[str, float, dict]:
     return message_text(result), elapsed, result.get("usage", {})
 
 
+def normalized_tokens(text: str) -> list[str]:
+    """Words used for a lightweight, deterministic answer-overlap score."""
+    return re.findall(r"\\w+", text.casefold(), flags=re.UNICODE)
+
+
+def answer_quality(answer: str, reference: str) -> dict:
+    """Exact match and multiset token precision/recall/F1 against a gold answer.
+
+    This is a lexical proxy, not a semantic judge; paraphrases may score lower.
+    """
+    predicted = Counter(normalized_tokens(answer))
+    expected = Counter(normalized_tokens(reference))
+    predicted_n, expected_n = sum(predicted.values()), sum(expected.values())
+    overlap = sum((predicted & expected).values())
+    precision = overlap / predicted_n if predicted_n else 0.0
+    recall = overlap / expected_n if expected_n else 0.0
+    f1 = (2 * precision * recall / (precision + recall)) if precision + recall else 0.0
+    return {
+        "exact_match": int(list(predicted.elements()) == list(expected.elements())),
+        "token_precision": round(precision, 4),
+        "token_recall": round(recall, 4),
+        "token_f1": round(f1, 4),
+    }
+
+
 def median(values: list) -> float | None:
     values = [float(v) for v in values if isinstance(v, (int, float))]
     return round(statistics.median(values), 3) if values else None
@@ -237,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--document", type=Path, required=True)
     parser.add_argument("--question", required=True)
+    reference_group = parser.add_mutually_exclusive_group()
+    reference_group.add_argument("--reference-answer", help="gold answer used for lexical quality scoring")
+    reference_group.add_argument("--reference-answer-file", type=Path, help="UTF-8 file containing the gold answer")
     parser.add_argument("--url", default="http://127.0.0.1:8000/v1/chat/completions")
     parser.add_argument("--status-url", help="optional /status URL; inferred from --url")
     parser.add_argument("--model", default="unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M")
@@ -256,6 +285,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--ratio must be in (0,1), --samples and --timeout must be positive")
     if args.mode == "model" and (not args.compressor_url or not args.compressor_model):
         parser.error("--mode model requires --compressor-url and --compressor-model")
+    reference_answer = args.reference_answer
+    if args.reference_answer_file:
+        try:
+            reference_answer = args.reference_answer_file.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            parser.error(f"cannot read reference answer: {exc}")
+    if reference_answer is not None and not reference_answer:
+        parser.error("reference answer is empty")
     if args.target_key_env == "":
         args.target_key_env = None
     if args.compressor_key_env == "":
@@ -283,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
                     candidate_context, _, compressor_usage = compress_with_model(args, context)
                 compression_ms = (time.monotonic() - started) * 1000 if variant == "compressed" else 0.0
                 row = target_request(args, candidate_context, variant, sample)
+                if reference_answer is not None:
+                    row["reference_scores"] = answer_quality(row["answer"], reference_answer)
                 row["compression_ms"] = round(compression_ms, 3)
                 row["end_to_end_ms"] = round(compression_ms + row["target_http_wall_ms"], 3)
                 if variant == "compressed":
@@ -290,9 +329,12 @@ def main(argv: list[str] | None = None) -> int:
                     row["compressor_usage"] = compressor_usage
                     row["compressed_context"] = candidate_context
                 records.append(row)
+                score = row.get("reference_scores", {}).get("token_f1")
+                score_text = f" ref-F1={score:.3f}" if score is not None else ""
                 print(
                     f"sample={sample} {variant:10s} tokens={row.get('prompt_tokens')} "
-                    f"TTFT={row.get('target_ttft_ms')}ms end-to-end={row['end_to_end_ms']}ms",
+                    f"TTFT={row.get('target_ttft_ms')}ms end-to-end={row['end_to_end_ms']}ms"
+                    f"{score_text}",
                     flush=True,
                 )
     except (RuntimeError, ValueError) as exc:
@@ -301,6 +343,13 @@ def main(argv: list[str] | None = None) -> int:
 
     full = [r for r in records if r["variant"] == "full"]
     compressed = [r for r in records if r["variant"] == "compressed"]
+    full_by_sample = {r["sample"]: r for r in full}
+    for row in compressed:
+        reference_row = full_by_sample.get(row["sample"])
+        if reference_row:
+            row["agreement_with_full_answer"] = answer_quality(
+                row["answer"], reference_row["answer"]
+            )
     summary = {
         "median_full_prompt_tokens": median([r.get("prompt_tokens") for r in full]),
         "median_compressed_prompt_tokens": median([r.get("prompt_tokens") for r in compressed]),
@@ -311,7 +360,37 @@ def main(argv: list[str] | None = None) -> int:
         "median_compression_ms": median([r.get("compression_ms") for r in compressed]),
         "median_full_end_to_end_ms": median([r.get("end_to_end_ms") for r in full]),
         "median_compressed_end_to_end_ms": median([r.get("end_to_end_ms") for r in compressed]),
+        "median_compressed_answer_token_f1_vs_full": median([
+            r.get("agreement_with_full_answer", {}).get("token_f1") for r in compressed
+        ]),
     }
+    if reference_answer is not None:
+        summary.update({
+            "median_full_reference_exact_match": median([
+                r.get("reference_scores", {}).get("exact_match") for r in full
+            ]),
+            "median_compressed_reference_exact_match": median([
+                r.get("reference_scores", {}).get("exact_match") for r in compressed
+            ]),
+            "median_full_reference_token_precision": median([
+                r.get("reference_scores", {}).get("token_precision") for r in full
+            ]),
+            "median_compressed_reference_token_precision": median([
+                r.get("reference_scores", {}).get("token_precision") for r in compressed
+            ]),
+            "median_full_reference_token_recall": median([
+                r.get("reference_scores", {}).get("token_recall") for r in full
+            ]),
+            "median_compressed_reference_token_recall": median([
+                r.get("reference_scores", {}).get("token_recall") for r in compressed
+            ]),
+            "median_full_reference_token_f1": median([
+                r.get("reference_scores", {}).get("token_f1") for r in full
+            ]),
+            "median_compressed_reference_token_f1": median([
+                r.get("reference_scores", {}).get("token_f1") for r in compressed
+            ]),
+        })
     if summary["median_full_end_to_end_ms"] and summary["median_compressed_end_to_end_ms"]:
         summary["end_to_end_speedup"] = round(
             summary["median_full_end_to_end_ms"] / summary["median_compressed_end_to_end_ms"], 3)
@@ -323,12 +402,15 @@ def main(argv: list[str] | None = None) -> int:
         "document_path": str(args.document),
         "document_sha256": hashlib.sha256(context.encode()).hexdigest(),
         "question": args.question,
+        "reference_answer": reference_answer,
         "settings": {"mode": args.mode, "ratio": args.ratio, "samples": args.samples},
         "summary": summary, "records": records,
         "notes": [
             "target_ttft_ms excludes compression; end_to_end_ms includes compression plus target HTTP time.",
             "extractive mode is a deterministic lexical baseline, not learned speculative prefill.",
             "Inspect the full and compressed answers before accepting a quality/speed trade-off.",
+            "Gold-answer exact match and token precision/recall/F1 are optional lexical proxies, not semantic correctness proofs.",
+            "agreement_with_full_answer measures lexical similarity to the baseline answer, not factual correctness.",
             "The optional compressor endpoint receives the full document; do not send sensitive text to an untrusted endpoint.",
         ],
     }
