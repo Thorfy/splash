@@ -23,11 +23,7 @@ Save a representative, non-sensitive long prompt/context as context.txt: for exa
 From the repository root, on branch experiment/speculative-prefill-qwen38:
 
 ```sh
-python3 -m dev.benchmarks.prefill_compression \\
-  --document context.txt \\
-  --question "What is the production database timeout?" \\
-  --model unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M \\
-  --mode extractive --ratio 0.50 --samples 3
+python3 -m dev.benchmarks.prefill_compression  --document context.txt  --question "What is the production database timeout?"  --model unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M  --mode extractive --ratio 0.50 --samples 3
 ```
 
 If your model label differs, pass it with --model. If the server uses a different endpoint, pass --url. When authentication is enabled, the script reads SPLASH_API_KEY; set --target-key-env "" to skip the key. Results are written to prefill-compression-results.json unless --output specifies another path.
@@ -39,14 +35,7 @@ Try --ratio 0.70 and --ratio 0.30 afterwards. A higher ratio keeps more text and
 The model mode calls a second OpenAI-compatible chat-completions endpoint to select verbatim excerpts:
 
 ```sh
-python3 -m dev.benchmarks.prefill_compression \\
-  --document context.txt \\
-  --question "What is the production database timeout?" \\
-  --model unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M \\
-  --mode model \\
-  --compressor-url http://127.0.0.1:8001/v1/chat/completions \\
-  --compressor-model YOUR_SMALL_MODEL_NAME \\
-  --ratio 0.50 --samples 3
+python3 -m dev.benchmarks.prefill_compression  --document context.txt  --question "What is the production database timeout?"  --model unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M  --mode model  --compressor-url http://127.0.0.1:8001/v1/chat/completions  --compressor-model YOUR_SMALL_MODEL_NAME  --ratio 0.50 --samples 3
 ```
 
 The compressor endpoint receives the entire document. Use only a trusted endpoint. This mode measures compressor latency as part of compression_ms and end_to_end_ms. Running two local models at once may cause memory pressure; the extractive mode requires no second model.
