@@ -56,7 +56,7 @@ The JSON records full and compressed answers alongside:
 - compression time and combined end-to-end time;
 - a summary of median values across samples.
 
-The script adds a unique nonce at the beginning of every target prompt so that full and compressed requests cannot accidentally turn into prefix-cache hits. Requests alternate order across samples to reduce order bias, but thermal state, other applications and memory pressure can still affect measurements. Prefer at least 5 samples for a serious comparison.
+The script adds a unique nonce near the start of every target prompt so that the long document body is not reused as a cached prefix across runs (a few shared chat-template tokens may still be cached). Requests alternate order across samples to reduce order bias, but thermal state, other applications and memory pressure can still affect measurements. Prefer at least 5 samples for a serious comparison.
 
 The key comparison is median_full_end_to_end_ms against median_compressed_end_to_end_ms; target-only TTFT excludes the compression cost and can therefore be misleading. Inspect the answer values before accepting a speed/quality trade-off: reject a ratio that drops essential facts, identifiers, exceptions, or code lines even if it is faster.
 
