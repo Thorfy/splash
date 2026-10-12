@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from dev.benchmarks.prefill_compression import chunks, extractive
+from dev.benchmarks.prefill_compression import answer_quality, chunks, extractive
 
 class ExtractiveCompressionTests(unittest.TestCase):
     def setUp(self):
@@ -31,6 +31,23 @@ class ExtractiveCompressionTests(unittest.TestCase):
 
     def test_empty_text_is_safe(self):
         self.assertEqual(extractive('', 'a question', 0.5), '')
+
+    def test_answer_quality_exact_match_is_case_insensitive(self):
+        score = answer_quality('The timeout is 45 seconds.', 'the timeout is 45 seconds')
+        self.assertEqual(score['exact_match'], 1)
+        self.assertEqual(score['token_f1'], 1.0)
+
+    def test_answer_quality_detects_missing_fact(self):
+        score = answer_quality('The timeout is 30 seconds.', 'The timeout is 45 seconds.')
+        self.assertEqual(score['exact_match'], 0)
+        self.assertLess(score['token_recall'], 1.0)
+        self.assertLess(score['token_f1'], 1.0)
+
+    def test_answer_quality_empty_answer(self):
+        score = answer_quality('', 'expected fact')
+        self.assertEqual(score['token_precision'], 0.0)
+        self.assertEqual(score['token_recall'], 0.0)
+        self.assertEqual(score['token_f1'], 0.0)
 
 if __name__ == '__main__':
     unittest.main()
