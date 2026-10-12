@@ -12,13 +12,19 @@ Start the model you usually use and wait until it is ready. For the documented G
 splash serve --model unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M
 ```
 
-Use the actual model value for your installation; MLX variants are also supported. Keep the server running on its usual port.
+Use the actual model value for your installation; MLX variants are also supported. Keep the server running on its usual port, and avoid sending other requests to it during the benchmark so the status-counter deltas stay meaningful.
 
 ## 2. Prepare a test document
 
 Save a representative, non-sensitive long prompt/context as context.txt: for example, a source file, a bundle of project notes, documentation, or a long conversation export. Ask a specific question whose answer really is present in the document. Avoid secrets and private data, especially when testing a remote compressor endpoint.
 
 ## 3. Run the local extractive baseline
+
+First, run the lightweight selector tests from the repository root:
+
+```sh
+PYTHONPATH=. python3 -m unittest dev.benchmarks.test_prefill_compression -v
+```
 
 From the repository root, on branch experiment/speculative-prefill-qwen38:
 
