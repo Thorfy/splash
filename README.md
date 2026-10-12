@@ -163,7 +163,6 @@ ship precompiled, with no Xcode or local tuning required.
 ## More
 
 - [Experimental prefill context compression](dev/benchmarks/prefill-compression.md): compare full prompts with a compressed-context baseline.
-
 - [Development](DEVELOPMENT.md): configuration, API, internals, building, and testing.
 - [Issues and feedback](https://github.com/incoai/splash/issues)
 - [Apache-2.0](LICENSE). GGUF kernels include MIT-licensed material from
